@@ -20,24 +20,27 @@ def coil_angle(value):
 def parse_args():
     parser = argparse.ArgumentParser(description="Magnetometer scanning system")
 
-    parser.add_argument("--num-points", type=int, default=10,
+    parser.add_argument("--num_points", type=int, default=10,
                         help="Number of measurement points (>=2)")
+    
+    parser.add_argument("--num_samples", type=int, default=128,
+                        help="Number of measurement samples (<=256)")
 
-    parser.add_argument("--relay-12v", action="store_true",
+    parser.add_argument("--relay_12v", action="store_true",
                         help="Use 12V relay")
 
-    parser.add_argument("--relay-on", action="store_true",
+    parser.add_argument("--relay_on", action="store_true",
                         help="Enable relay")
 
-    parser.add_argument("--magnetometer-resolution",
+    parser.add_argument("--magnetometer_resolution",
                         choices=MAG_RES_CHOICES,
                         default="8")
 
-    parser.add_argument("--adc-resolution",
+    parser.add_argument("--adc_resolution",
                         choices=ADC_RES_CHOICES,
                         default="0_512")
 
-    parser.add_argument("--coil-angle", type=coil_angle, default=0,
+    parser.add_argument("--coil_angle", type=coil_angle, default=0,
                         help="Coil angle in degrees. Max 90. Default 0.")
     
     parser.add_argument("--start_position", type=int, default=3000,
@@ -95,6 +98,7 @@ def main():
             drdy_pin=13,
             adc_addr=0x48,
             lis3mdl_addr=0x1C,
+            max_data_points = args.num_samples,
             magnetometer_resolution=args.magnetometer_resolution,
             adc_resolution=args.adc_resolution
         )

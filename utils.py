@@ -112,16 +112,16 @@ def plot_magnetometer_data(
 
     # Compute relative time
     t0 = df["timestamp"].min()
-    df["timestamp"] = df["timestamp"] - t0
-    df["diff"]= df["timestamp"].diff().fillna(0)
+    df["timestamp_norm"] = df["timestamp"] - t0
+    df["diff"]= df["timestamp_norm"].diff().fillna(0)
     df["id"] = range(len(df))
-    df["time_mod"] = df["timestamp"].apply(lambda x: x % 0.02)
+    df["time_mod"] = df["timestamp_norm"].apply(lambda x: x % 0.02)
     
     
     num = 1000
     final_res = {}
     for m_axis in ["mx","my","mz","v_shunt"]:
-        final_res[m_axis] = closed_solver(df["timestamp"], df[m_axis])
+        final_res[m_axis] = closed_solver(df["timestamp_norm"], df[m_axis])
         print(final_res[m_axis])
 
     fig, axes = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
@@ -130,7 +130,7 @@ def plot_magnetometer_data(
         ax = axes[i]
         
         # Scatter: time_rel (yellow, high opacity)
-        ax.scatter(df["timestamp"], df[axis], color='green', alpha=1, s=50, label='real_samples')
+        ax.scatter(df["timestamp_norm"], df[axis], color='green', alpha=1, s=50, label='real_samples')
               
         # Fit line (red, semi-transparent)
         t_fit = np.arange(0, 1, 0.001)
