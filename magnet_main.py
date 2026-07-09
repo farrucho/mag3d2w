@@ -54,11 +54,25 @@ def parse_args():
     if args.num_points < 2:
         parser.error("--num-points must be >= 2")
 
-    if args.start_position < 847 or args.start_position > 3500:
+    #if the starting position is out of bounds, when the coil is horizontal
+    if (args.coil_angle == 0) and (args.start_position < 0 or args.start_position > 3500):
+        parser.error("--start_position must be between 0 and 3500")
+
+    #if the max position is out of bounds, when the coil is horizontal
+    if (args.coil_angle == 0) and (args.max_position < 0 or args.max_position > 3500):
         parser.error("--start_position must be between 0 and 3500")
     
-    if (args.coil_angle != 0) & (args.max_position < 847):
-        parser.error("--max_position must be >= 847 when coil angle is not 0")
+    #if the starting position is out of bounds, when the coil is vertical
+    if (args.coil_angle != 0) and (args.start_position < 847 or args.start_position > 3500):
+        parser.error("--max_position must be >= 847 when coil angle is not 0 or < 3500”)
+
+    #if the max position is out of bounds, when the coil is vertical
+    if (args.coil_angle != 0) and (args.max_position < 847 or args.max_position > 3500):
+        parser.error("--max_position must be >= 847 when coil angle is not 0 or < 3500”)
+	
+    #note that max_position < starting_position, this means that the kart moves towards the coil
+    #when starting_position < max_position, then the kart moves away from the coil
+
 
     return args
 
