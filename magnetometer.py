@@ -223,7 +223,7 @@ class MagnetometerReader:
             v_shunt = self.adc.read() 
             self.data_count += 1
             self.data.append((t, mx, my, mz, v_shunt))
-            if self.data_count > self.max_data_points:
+            if self.data_count >= self.max_data_points:
                 break
     def stop(self):
         self.running = False
