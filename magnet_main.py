@@ -3,10 +3,10 @@ import subprocess
 import time
 import pigpio
 
-from magnetometer import MagnetometerReader
-from motor import StepperMotor
-from relay import RelayController
-from utils import angle_to_steps, plot_magnetometer_data
+from .magnetometer import MagnetometerReader
+from .motor import StepperMotor
+from .relay import RelayController
+from .utils import angle_to_steps, plot_magnetometer_data
 
 MAG_RES_CHOICES = ["4", "8", "12","16"]
 ADC_RES_CHOICES = ["0_256", "0_512", "1_024", "2_048", "4_096", "6_144"]
