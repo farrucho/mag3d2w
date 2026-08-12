@@ -48,4 +48,5 @@ class RelayController:
         time.sleep(0.05)
         self.set_voltage(use_12v)
         time.sleep(0.05)
-        self.on()
+        if relay_on:
+            self.on()

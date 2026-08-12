@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import time
 import pigpio
+import pandas as pd
 
 from .magnetometer import MagnetometerReader
 from .motor import StepperMotor
@@ -64,7 +65,7 @@ def parse_args():
     
     #if the starting position is out of bounds, when the coil is vertical
     if (args.coil_angle != 0) and (args.start_position < 847 or args.start_position > 3500):
-        parser.error("--max_position must be >= 847 when coil angle is not 0 or < 3500")
+        parser.error("--start_position must be >= 847 when coil angle is not 0 or < 3500")
 
     #if the max position is out of bounds, when the coil is vertical
     if (args.coil_angle != 0) and (args.max_position < 847 or args.max_position > 3500):
@@ -177,10 +178,12 @@ def main():
         start_positions = [i * step_interval for i in range(args.num_points)]
         return_data = {}
         for j, data in data_dict.items():
-            df = plot_magnetometer_data(
-                data,
-                filename=f"magnetic_plot_{j}.png"
-            )
+            df = pd.DataFrame(data, columns=["timestamp", "mx", "my", "mz", "v_shunt"])
+            # uncomment if you want to see plots
+            # df = plot_magnetometer_data(
+            #     data,
+            #     filename=f"magnetic_plot_{j}.png"
+            # )
             return_data[start_positions[j]] = df
         print("Scan complete!")
     except KeyboardInterrupt:
