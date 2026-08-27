@@ -93,7 +93,7 @@ def stop_pigpiod():
 
 
 
-def main():
+def main(callback=None):
     args = parse_args()
     reader = None
 
@@ -167,6 +167,10 @@ def main():
 
             if (not reader.repeat) and (reader.repeat_counter == 1):
                 data_dict[i] = data
+
+                if callback:
+                    callback(motor.position, data)
+
                 i += 1
                 reader.repeat_counter = 0
 
