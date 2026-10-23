@@ -1,1 +1,27 @@
-RPi_Proxy_mag3d2w/
+# Track the complete runtime source. Never publish real deployment settings.
+*.ini
+!*.ini.example
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+# Private per-device settings.
+config/*.local.json
+.env
+.env.*
+!.env.example
+*.local.ini
+# Generated acquisition output, not experimental source data elsewhere.
+plots/
+logs/
+results/
+/RPi_Proxy_mag3d2w/nohup.out*
+*.log
+.DS_Store
+tests

@@ -1,5 +1,6 @@
 import argparse
 import subprocess
+import sys
 import time
 import pigpio
 import pandas as pd
@@ -7,7 +8,11 @@ import pandas as pd
 from .magnetometer import MagnetometerReader
 from .motor import StepperMotor
 from .relay import RelayController
-from .utils import angle_to_steps, plot_magnetometer_data
+from .utils import angle_to_steps
+
+# CHANGE THIS:
+# (BCM GPIO): Lisbon = 6; Lordelo = 25.
+ADC_DRDY_PIN = 25
 
 MAG_RES_CHOICES = ["4", "8", "12","16"]
 ADC_RES_CHOICES = ["0_256", "0_512", "1_024", "2_048", "4_096", "6_144"]
@@ -105,7 +110,7 @@ def stop_pigpiod():
 
 def main(callback=None):
     args = parse_args()
-    reader = None
+    reader = motor = coil = relay = None
 
     start_pigpiod()
     pi = pigpio.pi()
@@ -123,6 +128,7 @@ def main(callback=None):
             drdy_pin=13,
             adc_addr=0x48,
             lis3mdl_addr=0x1C,
+            adc_drdy_pin=ADC_DRDY_PIN,
             max_data_points = args.num_samples,
             magnetometer_resolution=args.magnetometer_resolution,
             adc_resolution=args.adc_resolution
@@ -225,10 +231,6 @@ def main(callback=None):
         coil.find_max()
         time.sleep(0.3)
 
-        motor.disable()
-        coil.disable()
-        reader.stop()
-        relay.off()
         start_positions = [i * step_interval for i in range(args.num_points)]
         return_data = {}
         for j, data in data_dict.items():
@@ -237,40 +239,33 @@ def main(callback=None):
         print("Scan complete!")
     except KeyboardInterrupt:
         print("Interrupted by user")
-
-        try:
-            coil.find_max()
-        except Exception:
-            pass
-
-        if reader:
-            data = reader.get_data_copy()
-            plot_magnetometer_data(data=data)
-            reader.stop()
-
-        motor.disable()
-        coil.disable()
-        relay.off()
+        raise
 
     except Exception as e:
         print(f"Error: {e}")
 
-        try:
-            coil.find_max()
-        except Exception:
-            pass
-
-        if reader:
-            reader.stop()
-
-        motor.disable()
-        coil.disable()
-        relay.off()
         raise
 
     finally:
-        pi.stop()
-        stop_pigpiod()
+        # Preserve the original error for FREE. Never attempt another homing
+        # movement after a failed calibration. Try every cleanup independently.
+        failed = sys.exc_info()[0] is not None
+        cleanup_error = None
+        actions = [(relay.off if relay is not None else None),
+                   (motor.disable if motor is not None else None),
+                   (coil.disable if coil is not None else None),
+                   (reader.stop if reader is not None else None),
+                   pi.stop, stop_pigpiod]
+        for action in actions:
+            if action is not None:
+                try:
+                    action()
+                except Exception as error:
+                    print(f"[Cleanup] {getattr(action, '__name__', type(action).__name__)}: {error}")
+                    if cleanup_error is None:
+                        cleanup_error = error
+        if cleanup_error is not None and not failed:
+            raise cleanup_error
     return return_data
 
 

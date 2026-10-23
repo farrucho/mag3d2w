@@ -1,0 +1,17 @@
+# Camera settings: shell assignments sourced by video-stream.sh.
+# Same key order and non-private settings as the existing deployment.
+
+        video_server="YOUR_VIDEO_SERVER_HOSTNAME"
+        video_port="YOUR_VIDEO_SERVER_PORT"
+        apparatus_location="YOUR_LOCATION"
+        apparatus_name="YOUR_APPARATUS_NAME"
+        apparatus_id="YOUR_APPARATUS_ID"
+
+font_size=25
+
+usb_camera=/dev/video0
+video_width=640
+video_height=480
+video_frame=20
+
+engine=ffmpeg

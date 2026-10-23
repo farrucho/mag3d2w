@@ -137,14 +137,14 @@ class ADS1115_wDRDY:
         return raw - 65536 if raw > 32767 else raw
 
 class MagnetometerReader:
-    def __init__(self,pi: pigpio.pi, drdy_pin=6,lis3mdl_addr = 0x1C, adc_addr = 0x49, max_data_points = 128, max_queue=256, magnetometer_resolution = "8", adc_resolution = "0_512"):
+    def __init__(self,pi: pigpio.pi, drdy_pin=6,lis3mdl_addr = 0x1C, adc_addr = 0x49, max_data_points = 128, max_queue=256, magnetometer_resolution = "8", adc_resolution = "0_512", adc_drdy_pin=25):
         # Initialize sensor
         from board import I2C
         from adafruit_lis3mdl import LIS3MDL, Rate, Range
 
         i2c = I2C()
         self.sensor = LIS3MDL(i2c, address= lis3mdl_addr)
-        self.adc = ADS1115_wDRDY(i2c_addr=adc_addr, drdy_pin=25, adc_resolution=adc_resolution)
+        self.adc = ADS1115_wDRDY(i2c_addr=adc_addr, drdy_pin=adc_drdy_pin, adc_resolution=adc_resolution)
         self.sensor.data_rate = Rate.RATE_155_HZ
         self.sensor.range = magnetometer_resolution_to_range(magnetometer_resolution)
         self.sensor.enable_data_ready = True

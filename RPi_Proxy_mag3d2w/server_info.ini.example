@@ -1,0 +1,20 @@
+# Same sections, key order and non-private settings as the existing deployment.
+[DEFAULT]
+DEBUG = off
+
+[FREE]
+HTTPS = True
+SERVER = YOUR_FREE_SERVER_HOSTNAME
+PORT = YOUR_FREE_SERVER_PORT
+
+;  TIMOUT are in seconds
+;  If you want the same timeout on connect and read mantein
+; the TIMOUT_READ as None
+;  WARNNING: Don't use timout lower them 3 seconds
+TIMOUT_CONNECT = 30
+TIMOUT_READ = None
+
+[APPARATUS]
+ID= YOUR_APPARATUS_ID
+SECRET = YOUR_APPARATUS_SECRET
+FORMAT = 'utf-8'

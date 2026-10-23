@@ -1,6 +1,12 @@
 import pigpio
 import time
 
+
+class HomingError(RuntimeError):
+    """The reference switch was not reached within the permitted travel."""
+    code = "HOMING_SWITCH_NOT_REACHED"
+
+
 class StepperMotor:
     def __init__(self, pi: pigpio.pi, pins, switch_pin, step_delay=0.003, max_steps = 2700, direction = "forward"):
         """
@@ -75,10 +81,17 @@ class StepperMotor:
         print("Finding max position...")
         steps = 0
         sequence = list(reversed(self.sequence)) if self.direction == "forward" else self.sequence
-        while (not self.switch_pressed()) & (steps < self.max_steps):
-            self.step_once(sequence)
-            steps += 1
-        self.disable()
+        try:
+            while steps < self.max_steps and not self.switch_pressed():
+                self.step_once(sequence)
+                steps += 1
+            if not self.switch_pressed():
+                raise HomingError(
+                    f"{HomingError.code}: switch on BCM GPIO {self.switch_pin} "
+                    f"not reached after {steps} steps; calibration aborted"
+                )
+        finally:
+            self.disable()
         print(f"Max position: {steps}")
 
     def go_home(self):

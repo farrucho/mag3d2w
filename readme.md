@@ -1,25 +1,16 @@
-# lisbon
+# Mag3D2W
 
-magnetometer.py
+Criar virtual env chamada venv dentro do RPi_Proxy_mag3d2w folder e fazer ```pip instal -r requirements.txt```
 
+Apenas é necessário alterar uma setting no código para o deploy de cada uma das experiências:
+Lisbon and Lordelo. No topo do ficheiro `magnet_main.py`, alterar:
+
+```python
+# CHANGE THIS:
+# (BCM GPIO): Lisbon = 6; Lordelo = 25.
+ADC_DRDY_PIN = 25
 ```
-class ADS1115_wDRDY
-def __init__(self, i2c_bus: int = 1, i2c_addr: int = 0x49, drdy_pin: int = 6, queue_size: int = 100, adc_resolution = "0_512"):
+Ambas as aquisições usam os endereços ADC `0x48` no magnetometro e `0x1c`. Dá para verificar com o comando: ```sudo i2cdetect -y 1```.
 
-class MagnetometerReader
-def __init__(self,pi: pigpio.pi, drdy_pin=13,lis3mdl_addr = 0x1C, adc_addr = 0x49, max_data_points = 128, max_queue=256, magnetometer_resolution = "8", adc_resolution = "0_512"):
-self.adc = ADS1115_wDRDY(i2c_addr=adc_addr, drdy_pin=6,
-  adc_resolution=adc_resolution)
-```
 
-# lordelo
 
-magnetometer.py
-
-```
-class ADS1115_wDRDY
-def __init__(self, i2c_bus: int = 1, i2c_addr: int = 0x49, drdy_pin: int = 17, queue_size: int = 100, adc_resolution = "0_512"):
-
-class MagnetometerReader
-def __init__(self,pi: pigpio.pi, drdy_pin=6,lis3mdl_addr = 0x1C, adc_addr = 0x49, max_data_points = 128, max_queue=256, magnetometer_resolution = "8", adc_resolution = "0_512"):
-```
