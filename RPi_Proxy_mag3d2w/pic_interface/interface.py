@@ -22,36 +22,59 @@ def do_init(config, debug_mode):
     print("[Interface] Initialized with config.")
     return True
 
+def _is_angle_sweep(myjson):
+    """The FREE server sends protocol={id,name,config} with every execution."""
+    name = str((myjson.get("protocol") or {}).get("name", "")).strip().lower()
+    return name == "angle sweep"
+
+
+def _mm_to_steps(mm):
+    # same conversion the position sweep always used (0 steps == -59 mm)
+    return int(int(mm + 59) * 1000 / 124)
+
+
 def do_config(myjson):
-    # python —main.py —num_points 4 —relay-12V —relay-on —magnetometer-resolution 8 —adc-resolution “0_512” —coil-angle 45 —start_position 3000
+    # python main.py --num_points 4 --relay_12v --relay_on --magnetometer_resolution 8 --adc_resolution "0_512" --coil_angle 45 --start_position 3000
+    # python main.py --sweep angle --angle_min 10 --angle_max 80 --num_points 15 --start_position 1500 --relay_on
     print(f"[Interface] Configuring device execution with ID: {myjson.get('id')}")
 
-    # config_params = myjson.get("protocol", {}).get("config", {})
-    sys.argv = ["magnet_main.py"]
+    try:
+        cfg = myjson['config']
+        sys.argv = ["magnet_main.py"]
 
-    # angle
-    sys.argv.extend(["--coil_angle", str(myjson['config']["angle"])])
+        # voltage (common to both protocols)
+        if str(cfg["voltage"]) == "6":
+            sys.argv.extend(["--relay_on"])
+        if str(cfg["voltage"]) == "12":
+            sys.argv.extend(["--relay_on"])
+            sys.argv.extend(["--relay_12v"])
 
-    # voltage
-    if str(myjson['config']["voltage"]) == "0":
-        pass
-    if str(myjson['config']['voltage']) == "6":
-        sys.argv.extend(["--relay_on"])
-    if str(myjson['config']['voltage']) == "12":
-        sys.argv.extend(["--relay_on"])
-        sys.argv.extend(["--relay_12v"])
+        # samples taken at each point (common)
+        sys.argv.extend(["--num_samples", str(cfg["local_samples"])])
 
-    # n_pos_samples
-    sys.argv.extend(["--num_samples", str(myjson['config']["local_samples"])])
-
-
-    # local_samples
-    sys.argv.extend(["--num_points", str(myjson['config']["n_pos_samples"])])
-
-
-    # initial and final position
-    sys.argv.extend(["--start_position", str(int(int(myjson['config']["pos_init"]+59)*1000/124))])
-    sys.argv.extend(["--max_position", str(int(int(myjson['config']["pos_final"]+59)*1000/124))])
+        if _is_angle_sweep(myjson):
+            # Angle Sweep: cart parked at `fixed_position`, coil goes angle_min -> angle_max
+            sys.argv.extend(["--sweep", "angle"])
+            sys.argv.extend(["--angle_min", str(cfg["angle_min"])])
+            sys.argv.extend(["--angle_max", str(cfg["angle_max"])])
+            sys.argv.extend(["--num_points", str(cfg["n_angle_samples"])])
+            fixed_steps = magnet_main.mm_to_steps(cfg["fixed_position"])      # rounds away from the coil, <= 1 step (0.124 mm)
+            sys.argv.extend(["--start_position", str(fixed_steps)])
+            # refuse right away (status E, nothing moves) if any angle of the sweep makes the position invalid
+            error = magnet_main.angle_sweep_position_error(
+                float(cfg["angle_min"]), float(cfg["angle_max"]), position_mm=cfg["fixed_position"])
+            if error:
+                print(f"[Interface] Angle sweep refused: {error}")
+                return -1, False
+        else:
+            # Position Sweep (unchanged behaviour)
+            sys.argv.extend(["--coil_angle", str(cfg["angle"])])
+            sys.argv.extend(["--num_points", str(cfg["n_pos_samples"])])
+            sys.argv.extend(["--start_position", str(_mm_to_steps(cfg["pos_init"]))])
+            sys.argv.extend(["--max_position", str(_mm_to_steps(cfg["pos_final"]))])
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"[Interface] Invalid configuration for this protocol: {e!r}")
+        return -1, False
 
     print(sys.argv)
 
@@ -62,7 +85,7 @@ def do_config(myjson):
 
 first_timestamp = None
 
-def stream_point_callback(position_steps, data_tuples):
+def stream_point_callback(position_steps, data_tuples, angle=None):
     """
     Callback called after each point is measured to stream samples on the line immediately.
     """
@@ -89,6 +112,8 @@ def stream_point_callback(position_steps, data_tuples):
                 "field_y": str(my),
                 "field_z": str(mz),
             }
+            if angle is not None:
+                data_point["angle"] = angle
             data_queue.append(data_point)
     except Exception as e:
         print(f"[Interface] Error in stream_point_callback: {e}")

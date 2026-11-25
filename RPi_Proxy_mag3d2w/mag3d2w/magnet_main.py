@@ -1,4 +1,6 @@
 import argparse
+import math
+from fractions import Fraction
 import subprocess
 import sys
 import time
@@ -8,11 +10,71 @@ import pandas as pd
 from .magnetometer import MagnetometerReader
 from .motor import StepperMotor
 from .relay import RelayController
-from .utils import angle_to_steps
+from .utils import angle_to_steps, steps_to_angle  # noqa
 
 # CHANGE THIS:
 # (BCM GPIO): Lisbon = 6; Lordelo = 25.
 ADC_DRDY_PIN = 25
+
+# --- Angle sweep (coil rotates, cart stays at a fixed position) ---------------
+ANGLE_SWEEP_MAX_POSITION_STEPS = 3500
+ANGLE_SWEEP_MAX_ANGLE = 110
+
+
+def mm_to_steps(mm):
+    """Cart conversion: 0 steps == -59 mm, 1 step == 0.124 mm.
+    Rounds UP (away from the coil, the safe side) so the cart is never closer than
+    asked: the real position is at most 1 step (0.124 mm) further. Exact arithmetic
+    (Fraction), so e.g. 40 mm can't become 798.0000001 -> 799 by float noise."""
+    return math.ceil((Fraction(str(mm)) + 59) * 1000 / 124)
+
+
+# Closest the cart may be (mm) for each range of coil angles. Same rule the web
+# page applies (mag3d2w.html, add_relation). (lo, lo_included, hi, hi_included, mm)
+CART_MIN_MM_BY_ANGLE = [
+    (0,  True,  0,   True,  -59),    # exactly 0 deg
+    (0,  False, 75,  False,  40),    # 0 < angle < 75
+    (75, True,  90,  True,   15),    # 75 <= angle <= 90
+    (90, False, 120, True,   40),    # 90 < angle <= 120
+]
+
+
+def angle_sweep_required_mm(angle_min, angle_max):
+    """(required_mm, lo, hi) for the most demanding range of angles the coil goes
+    through between angle_min and angle_max (exact interval check, no sampling)."""
+    worst = None
+    for lo, lo_in, hi, hi_in, mm in CART_MIN_MM_BY_ANGLE:
+        a, b = max(angle_min, lo), min(angle_max, hi)
+        if a < b:
+            touches = True
+        elif a == b:                               # a single shared point: must belong to both ranges
+            touches = (angle_min <= a <= angle_max) and (a > lo or lo_in) and (a < hi or hi_in)
+        else:
+            touches = False
+        if touches and (worst is None or mm > worst[0]):
+            worst = (mm, a, b)
+    return worst
+
+
+def angle_sweep_position_error(angle_min, angle_max, position_steps=None, position_mm=None):
+    """None if the fixed cart position is valid for EVERY angle the coil goes
+    through between angle_min and angle_max, otherwise a message saying which
+    angles make it invalid. Give the position in mm (as typed by the user, exact
+    comparison) or in steps (as received by the command line)."""
+    worst = angle_sweep_required_mm(angle_min, angle_max)
+    if worst is None:
+        return None
+    required_mm, a, b = worst
+    if position_mm is not None:
+        invalid, pos_mm = Fraction(str(position_mm)) < required_mm, position_mm
+    else:
+        invalid = position_steps < mm_to_steps(required_mm)
+        pos_mm = round(position_steps * 124 / 1000 - 59, 2)
+    if invalid:
+        where = f"{a}°" if a == b else f"{a}° to {b}°"
+        return (f"cart position {pos_mm} mm is not valid for a coil at {where}: "
+                f"it must be >= {required_mm} mm")
+    return None
 
 MAG_RES_CHOICES = ["4", "8", "12","16"]
 ADC_RES_CHOICES = ["0_256", "0_512", "1_024", "2_048", "4_096", "6_144"]
@@ -55,40 +117,33 @@ def parse_args():
     parser.add_argument("--max_position", type=int, default=0,
                         help="Max position in steps. Default 0 switch.")
 
+    parser.add_argument("--sweep", choices=["position", "angle"], default="position",
+                        help="position (default): cart moves, coil fixed. "
+                             "angle: coil rotates between --angle_min and --angle_max, "
+                             "cart stays at --start_position.")
+
+    parser.add_argument("--angle_min", type=float, default=0,
+                        help="Angle sweep only: first coil angle in degrees.")
+
+    parser.add_argument("--angle_max", type=float, default=0,
+                        help="Angle sweep only: last coil angle in degrees.")
+
     args = parser.parse_args()
 
     if args.num_points < 2:
         parser.error("--num-points must be >= 2")
 
-
-
-    # -------------------------------------------------------------
-    # 1. Caso: Ângulo == 0° (Espira Horizontal - Passa por baixo)
-    # -------------------------------------------------------------
-    # if args.coil_angle == 0:
-    #     if args.start_position < 0 or args.start_position > 3500:
-    #         parser.error("--start_position must be between 0 and 3500 when coil angle is 0")
-    #     if args.max_position < 0 or args.max_position > 3500:
-    #         parser.error("--max_position must be between 0 and 3500 when coil angle is 0")
-
-    # # -------------------------------------------------------------
-    # # 2. Caso: 0° < Ângulo <= 75° (Limites padrão != 0 -> >= 847 passos)
-    # # -------------------------------------------------------------
-    # elif 0 < args.coil_angle <= 75:
-    #     if args.start_position < 847 or args.start_position > 3500:
-    #         parser.error("--start_position must be between 847 and 3500 for coil angle between 0° and 75°")
-    #     if args.max_position < 847 or args.max_position > 3500:
-    #         parser.error("--max_position must be between 847 and 3500 for coil angle between 0° and 75°")
-
-    # # -------------------------------------------------------------
-    # # 3. Caso: 75° < Ângulo <= 120° (35 mm -> >= 758 passos)
-    # # -------------------------------------------------------------
-    # elif 75 < args.coil_angle <= 120:
-    #     min_steps_closer = 758  # 35 mm (~758 passos)
-    #     if args.start_position < min_steps_closer or args.start_position > 3500:
-    #         parser.error(f"--start_position must be between {min_steps_closer} and 3500 for coil angle between 75° and 120°")
-    #     if args.max_position < min_steps_closer or args.max_position > 3500:
-    #         parser.error(f"--max_position must be between {min_steps_closer} and 3500 for coil angle between 75° and 120°")
+    # Check if arguments are valid
+    if args.sweep == "angle":
+        if not (0 <= args.angle_min < args.angle_max <= ANGLE_SWEEP_MAX_ANGLE):
+            parser.error(f"angle sweep needs 0 <= --angle_min < --angle_max <= {ANGLE_SWEEP_MAX_ANGLE}, "
+                         f"got {args.angle_min} and {args.angle_max}")
+        if args.start_position > ANGLE_SWEEP_MAX_POSITION_STEPS:
+            parser.error(f"angle sweep needs --start_position (fixed cart position) <= "
+                         f"{ANGLE_SWEEP_MAX_POSITION_STEPS} steps, got {args.start_position}")
+        error = angle_sweep_position_error(args.angle_min, args.angle_max, args.start_position)
+        if error:
+            parser.error(error)
 
     return args
 
@@ -171,9 +226,15 @@ def main(callback=None):
         time.sleep(0.3)
 
         # Roda a espira para o ângulo pretendido em total segurança
-        if args.coil_angle != 0:
-            print(f"Rodando espira para {args.coil_angle}°...")
-            coil.move_steps(angle_to_steps(args.coil_angle), "backward")
+        # (angle sweep: o ângulo inicial é angle_min; a espira roda aqui, com o
+        # carrinho ainda nos 60 mm, e só depois o carrinho vai para a posição fixa)
+        if args.sweep == "angle":
+            initial_angle, initial_steps = args.angle_min, round(args.angle_min * 475 / 90)
+        else:
+            initial_angle, initial_steps = args.coil_angle, angle_to_steps(args.coil_angle)
+        if initial_angle != 0:
+            print(f"Rodando espira para {initial_angle}°...")
+            coil.move_steps(initial_steps, "backward")
             time.sleep(0.3)
 
         # Move o carrinho dos 60 mm para a posição inicial pedida pelo utilizador
@@ -184,41 +245,82 @@ def main(callback=None):
             motor.move_steps(abs(delta_to_start), "forward")
         time.sleep(0.3)
 
-        motor.position = 0
-        motor.max_position = args.start_position - args.max_position
-        
-        step_interval = motor.max_position // (args.num_points - 1)
-        print(f"Step interval: {step_interval}")
-
         data_dict = {}
-        i = 0
 
-        while i < args.num_points:
-            target = i * step_interval
-            move = target - motor.position
+        if args.sweep == "angle":
+            # -----------------------------------------------------------------
+            # ANGLE SWEEP: cart parked at args.start_position, coil rotates from
+            # angle_min to angle_max in (num_points - 1) equal steps.
+            # The coil is already at angle_min (rotated above, cart at 60 mm);
+            # coil.position counts coil steps from 0 deg (homed at the start).
+            # -----------------------------------------------------------------
+            angle_targets = [args.angle_min + k * (args.angle_max - args.angle_min) / (args.num_points - 1)
+                             for k in range(args.num_points)]
+            step_targets = [round(a * 475 / 90) for a in angle_targets]   # round (not int) so 10° -> 10.04° instead of 9.85°
+            print(f"Angle sweep: {args.angle_min}° -> {args.angle_max}° in {args.num_points} points "
+                  f"at fixed cart position {args.start_position} steps")
 
-            if move > 0:
-                motor.move_steps(move, "forward")
-            elif move < 0:
-                motor.move_steps(abs(move), "backward")
+            i = 0
+            while i < args.num_points:
+                move = step_targets[i] - coil.position
+                if move > 0:
+                    coil.move_steps(move, "backward")    # backward = angle increases
+                elif move < 0:
+                    coil.move_steps(abs(move), "forward")
+                time.sleep(0.3)
 
-            reader.start()
-            data = reader.reset()
+                reader.start()
+                data = reader.reset()
 
-            if (not reader.repeat) and (reader.repeat_counter == 1):
-                data_dict[i] = data
+                if (not reader.repeat) and (reader.repeat_counter == 1):
+                    data_dict[i] = data
 
-                if callback:
-                    callback(motor.position, data)
+                    if callback:
+                        # position_steps=0 -> the cart did not move; real angle reached
+                        callback(0, data, angle=round(steps_to_angle(coil.position), 2))
 
-                i += 1
-                reader.repeat_counter = 0
+                    i += 1
+                    reader.repeat_counter = 0
+
+            scan_keys = [steps_to_angle(s) for s in step_targets]
+            current_abs_position = args.start_position
+        else:
+            motor.position = 0
+            motor.max_position = args.start_position - args.max_position
+
+            step_interval = motor.max_position // (args.num_points - 1)
+            print(f"Step interval: {step_interval}")
+
+            i = 0
+
+            while i < args.num_points:
+                target = i * step_interval
+                move = target - motor.position
+
+                if move > 0:
+                    motor.move_steps(move, "forward")
+                elif move < 0:
+                    motor.move_steps(abs(move), "backward")
+
+                reader.start()
+                data = reader.reset()
+
+                if (not reader.repeat) and (reader.repeat_counter == 1):
+                    data_dict[i] = data
+
+                    if callback:
+                        callback(motor.position, data)
+
+                    i += 1
+                    reader.repeat_counter = 0
+
+            scan_keys = [i * step_interval for i in range(args.num_points)]
+            current_abs_position = args.start_position - (args.num_points - 1) * step_interval
 
         # =========================================================================
         # 2. TEARDOWN: RETORNO À COORDENADA ABSOLUTA DE 60 MM & ESPIRA A 0°
         # =========================================================================
         print("Finalizando scan: retornando à posição absoluta de 60 mm...")
-        current_abs_position = args.start_position - (args.num_points - 1) * step_interval
         delta_to_safe = safe_standoff_steps - current_abs_position
         if delta_to_safe > 0:
             motor.move_steps(delta_to_safe, "backward")
@@ -231,11 +333,10 @@ def main(callback=None):
         coil.find_max()
         time.sleep(0.3)
 
-        start_positions = [i * step_interval for i in range(args.num_points)]
         return_data = {}
         for j, data in data_dict.items():
             df = pd.DataFrame(data, columns=["timestamp", "mx", "my", "mz", "v_shunt"])
-            return_data[start_positions[j]] = df
+            return_data[scan_keys[j]] = df
         print("Scan complete!")
     except KeyboardInterrupt:
         print("Interrupted by user")

@@ -55,6 +55,10 @@ def angle_to_steps(angle: float) -> int:
     ratio = 475/90
     return int(angle * ratio)
 
+def steps_to_angle(steps: int) -> float:
+    """Inverse of angle_to_steps: angle (deg) really reached after `steps` coil steps."""
+    return steps * 90 / 475
+
 def closed_solver(tt, yy, freq=50):
     tt = np.array(tt)
     yy = np.array(yy)
