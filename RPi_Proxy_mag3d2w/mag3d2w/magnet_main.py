@@ -21,6 +21,44 @@ ANGLE_SWEEP_MAX_POSITION_STEPS = 3500
 ANGLE_SWEEP_MAX_ANGLE = 110
 
 
+def angle_to_coil_step(angle):
+    """Coil step nearest to an angle (1 step = 90/475 deg). Exact arithmetic, and a
+    value exactly halfway between two steps goes UP: Python's round() sends halves to
+    the even number (47.5 -> 48 but 48.5 -> 48) which repeats a step."""
+    return math.floor(Fraction(str(angle)) * 475 / 90 + Fraction(1, 2))
+
+
+def equal_spacing_plan(total_steps, num_points):
+    """(step, n_points) for a sweep over `total_steps` motor steps (>= num_points-1) with
+    `num_points` points. ALL points are exactly `step` steps apart (integer, so the
+    spacing is identical everywhere), the first one is the start and the last one gets
+    as close as possible to the end WITHOUT passing it: step = total // (n-1), the
+    largest spacing that fits n points. The last point stops short of the end by
+    less than n-1 steps (the remainder of that division)."""
+    step = max(1, total_steps // (num_points - 1))
+    return step, num_points
+
+
+def position_sweep_targets(total_steps, num_points):
+    """Cart step targets of the position sweep, relative to the start: equally spaced
+    (equal_spacing_plan), never beyond the requested end. May return fewer than
+    num_points targets."""
+    sign = -1 if total_steps < 0 else 1
+    step, n = equal_spacing_plan(abs(total_steps), num_points)
+    return [sign * step * i for i in range(n)]
+
+
+def position_sweep_points_error(start_steps, end_steps, num_points):
+    """None if every one of the num_points positions falls on a different cart step
+    (1 step = 0.124 mm), otherwise a message with the largest number of points possible."""
+    max_points = abs(start_steps - end_steps) + 1
+    if num_points > max_points:
+        return (f"the range between the start and end positions only has {max_points} distinct cart "
+                f"positions (1 step = 0.124 mm): the number of points must be at most {max_points}, "
+                f"got {num_points}")
+    return None
+
+
 def mm_to_steps(mm):
     """Cart conversion: 0 steps == -59 mm, 1 step == 0.124 mm.
     Rounds UP (away from the coil, the safe side) so the cart is never closer than
@@ -54,6 +92,24 @@ def angle_sweep_required_mm(angle_min, angle_max):
         if touches and (worst is None or mm > worst[0]):
             worst = (mm, a, b)
     return worst
+
+
+def angle_sweep_total_steps(angle_min, angle_max):
+    """Coil steps between the first point (step nearest to angle_min) and the last step
+    that does NOT go beyond angle_max."""
+    last = math.floor(Fraction(str(angle_max)) * 475 / 90)
+    return last - angle_to_coil_step(angle_min)
+
+
+def angle_sweep_points_error(angle_min, angle_max, num_points):
+    """None if every one of the num_points angles falls on a different coil step
+    (1 step = 90/475 deg), otherwise a message with the largest number of points
+    possible. This way the coil is never measured twice at the same position."""
+    max_points = angle_sweep_total_steps(angle_min, angle_max) + 1
+    if num_points > max_points:
+        return (f"{angle_min}° to {angle_max}° only has {max_points} distinct coil positions "
+                f"(1 step = 0.19°): the number of angles must be at most {max_points}, got {num_points}")
+    return None
 
 
 def angle_sweep_position_error(angle_min, angle_max, position_steps=None, position_mm=None):
@@ -134,6 +190,11 @@ def parse_args():
         parser.error("--num-points must be >= 2")
 
     # Check if arguments are valid
+    if args.sweep == "position":
+        error = position_sweep_points_error(args.start_position, args.max_position, args.num_points)
+        if error:
+            parser.error(error)
+
     if args.sweep == "angle":
         if not (0 <= args.angle_min < args.angle_max <= ANGLE_SWEEP_MAX_ANGLE):
             parser.error(f"angle sweep needs 0 <= --angle_min < --angle_max <= {ANGLE_SWEEP_MAX_ANGLE}, "
@@ -141,7 +202,8 @@ def parse_args():
         if args.start_position > ANGLE_SWEEP_MAX_POSITION_STEPS:
             parser.error(f"angle sweep needs --start_position (fixed cart position) <= "
                          f"{ANGLE_SWEEP_MAX_POSITION_STEPS} steps, got {args.start_position}")
-        error = angle_sweep_position_error(args.angle_min, args.angle_max, args.start_position)
+        error = (angle_sweep_position_error(args.angle_min, args.angle_max, args.start_position)
+                 or angle_sweep_points_error(args.angle_min, args.angle_max, args.num_points))
         if error:
             parser.error(error)
 
@@ -229,7 +291,7 @@ def main(callback=None):
         # (angle sweep: o ângulo inicial é angle_min; a espira roda aqui, com o
         # carrinho ainda nos 60 mm, e só depois o carrinho vai para a posição fixa)
         if args.sweep == "angle":
-            initial_angle, initial_steps = args.angle_min, round(args.angle_min * 475 / 90)
+            initial_angle, initial_steps = args.angle_min, angle_to_coil_step(args.angle_min)
         else:
             initial_angle, initial_steps = args.coil_angle, angle_to_steps(args.coil_angle)
         if initial_angle != 0:
@@ -254,14 +316,16 @@ def main(callback=None):
             # The coil is already at angle_min (rotated above, cart at 60 mm);
             # coil.position counts coil steps from 0 deg (homed at the start).
             # -----------------------------------------------------------------
-            angle_targets = [args.angle_min + k * (args.angle_max - args.angle_min) / (args.num_points - 1)
-                             for k in range(args.num_points)]
-            step_targets = [round(a * 475 / 90) for a in angle_targets]   # round (not int) so 10° -> 10.04° instead of 9.85°
-            print(f"Angle sweep: {args.angle_min}° -> {args.angle_max}° in {args.num_points} points "
-                  f"at fixed cart position {args.start_position} steps")
+            # Equal spacing in coil steps (equal_spacing_plan), never beyond angle_max.
+            first = angle_to_coil_step(args.angle_min)
+            plan_step, n_points = equal_spacing_plan(
+                angle_sweep_total_steps(args.angle_min, args.angle_max), args.num_points)
+            step_targets = [first + plan_step * k for k in range(n_points)]
+            print(f"Angle sweep: {args.angle_min}° -> {args.angle_max}° in {n_points} points "
+                  f"({plan_step} coil steps apart) at fixed cart position {args.start_position} steps")
 
             i = 0
-            while i < args.num_points:
+            while i < n_points:
                 move = step_targets[i] - coil.position
                 if move > 0:
                     coil.move_steps(move, "backward")    # backward = angle increases
@@ -288,13 +352,13 @@ def main(callback=None):
             motor.position = 0
             motor.max_position = args.start_position - args.max_position
 
-            step_interval = motor.max_position // (args.num_points - 1)
-            print(f"Step interval: {step_interval}")
+            step_targets = position_sweep_targets(motor.max_position, args.num_points)
+            print(f"Position targets (steps from the start): {step_targets}")
 
             i = 0
 
-            while i < args.num_points:
-                target = i * step_interval
+            while i < len(step_targets):
+                target = step_targets[i]
                 move = target - motor.position
 
                 if move > 0:
@@ -314,8 +378,8 @@ def main(callback=None):
                     i += 1
                     reader.repeat_counter = 0
 
-            scan_keys = [i * step_interval for i in range(args.num_points)]
-            current_abs_position = args.start_position - (args.num_points - 1) * step_interval
+            scan_keys = step_targets
+            current_abs_position = args.start_position - motor.position          # where the cart really is
 
         # =========================================================================
         # 2. TEARDOWN: RETORNO À COORDENADA ABSOLUTA DE 60 MM & ESPIRA A 0°

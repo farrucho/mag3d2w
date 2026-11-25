@@ -62,7 +62,9 @@ def do_config(myjson):
             sys.argv.extend(["--start_position", str(fixed_steps)])
             # refuse right away (status E, nothing moves) if any angle of the sweep makes the position invalid
             error = magnet_main.angle_sweep_position_error(
-                float(cfg["angle_min"]), float(cfg["angle_max"]), position_mm=cfg["fixed_position"])
+                float(cfg["angle_min"]), float(cfg["angle_max"]), position_mm=cfg["fixed_position"]) \
+                or magnet_main.angle_sweep_points_error(
+                float(cfg["angle_min"]), float(cfg["angle_max"]), int(cfg["n_angle_samples"]))
             if error:
                 print(f"[Interface] Angle sweep refused: {error}")
                 return error, False
@@ -72,6 +74,11 @@ def do_config(myjson):
             sys.argv.extend(["--num_points", str(cfg["n_pos_samples"])])
             sys.argv.extend(["--start_position", str(_mm_to_steps(cfg["pos_init"]))])
             sys.argv.extend(["--max_position", str(_mm_to_steps(cfg["pos_final"]))])
+            error = magnet_main.position_sweep_points_error(
+                _mm_to_steps(cfg["pos_init"]), _mm_to_steps(cfg["pos_final"]), int(cfg["n_pos_samples"]))
+            if error:
+                print(f"[Interface] Position sweep refused: {error}")
+                return error, False
     except (KeyError, TypeError, ValueError) as e:
         print(f"[Interface] Invalid configuration for this protocol: {e!r}")
         return f"invalid configuration for this protocol: {e!r}", False
@@ -96,7 +103,7 @@ def stream_point_callback(position_steps, data_tuples, angle=None):
             idx = sys.argv.index("--start_position")
             start_position_steps = int(sys.argv[idx + 1])
 
-        total_steps = start_position_steps + abs(position_steps)
+        total_steps = start_position_steps - position_steps      # position_steps > 0 = moved toward the coil
         real_pos_mm = round((total_steps * 124 / 1000) - 59, 2)
 
         if first_timestamp is None and data_tuples:
