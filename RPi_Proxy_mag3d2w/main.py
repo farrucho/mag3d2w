@@ -272,6 +272,25 @@ def send_exp_data(COMfree,next_execution_id):
         Working = False
 
 
+def ReportExecutionError(COMfree, execution_id, reason=""):
+    """Mark an execution that was refused BEFORE starting as Error (E).
+    The FREE server only accepts Q->R and R->E/F, so a queued execution has to go
+    through R first; sending E straight from Q is rejected (HTTP 400) and the proxy
+    would fetch the same execution again forever. The status endpoint takes no
+    message, so the reason is only written to the local log."""
+    print(f"[Execution {execution_id}] refused: {reason}")
+    try:
+        log.ReportLog(3, f"Execution {execution_id} refused: {reason}")
+    except Exception as log_error:
+        print(f"[Execution {execution_id}] Could not write error log: {log_error}")
+    for status in ("R", "E"):
+        try:
+            SendInfoAboutExecution(COMfree, int(execution_id), status)
+        except Exception as error:
+            print(f"[Execution {execution_id}] Could not report status {status}: {error}")
+            return
+
+
 def Send_Config_to_Pic(COMfree,myjson):
     global Working
 
@@ -290,10 +309,10 @@ def Send_Config_to_Pic(COMfree,myjson):
             #send_mensage = '{"reply_id": "2","status":"Experiment Running","config_params":"'+str(myjson["config_params"])+'}'
             # Working = True
         else :
-            SendInfoAboutExecution(COMfree,myjson["id"],"E")
+            ReportExecutionError(COMfree, myjson["id"], "could not start the acquisition")
     
     else:
-        SendInfoAboutExecution(COMfree,myjson["id"],"E")
+        ReportExecutionError(COMfree, myjson["id"], actual_config)
     return ''
 
 

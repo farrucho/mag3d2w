@@ -65,7 +65,7 @@ def do_config(myjson):
                 float(cfg["angle_min"]), float(cfg["angle_max"]), position_mm=cfg["fixed_position"])
             if error:
                 print(f"[Interface] Angle sweep refused: {error}")
-                return -1, False
+                return error, False
         else:
             # Position Sweep (unchanged behaviour)
             sys.argv.extend(["--coil_angle", str(cfg["angle"])])
@@ -74,7 +74,7 @@ def do_config(myjson):
             sys.argv.extend(["--max_position", str(_mm_to_steps(cfg["pos_final"]))])
     except (KeyError, TypeError, ValueError) as e:
         print(f"[Interface] Invalid configuration for this protocol: {e!r}")
-        return -1, False
+        return f"invalid configuration for this protocol: {e!r}", False
 
     print(sys.argv)
 
