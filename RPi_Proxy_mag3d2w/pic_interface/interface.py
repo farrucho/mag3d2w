@@ -23,9 +23,11 @@ def do_init(config, debug_mode):
     return True
 
 def _is_angle_sweep(myjson):
-    """The FREE server sends protocol={id,name,config} with every execution."""
-    name = str((myjson.get("protocol") or {}).get("name", "")).strip().lower()
-    return name == "angle sweep"
+    """True for the protocol where the coil rotates and the cart stays fixed ("Angle Sweep",
+    renamed "Fixed position" on the server). Decided by the configuration it sends
+    (angle_min/angle_max), not by the protocol name, so renaming protocols can't break it."""
+    cfg = myjson.get("config") or {}
+    return "angle_min" in cfg and "angle_max" in cfg
 
 
 def _mm_to_steps(mm):
